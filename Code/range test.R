@@ -12,7 +12,7 @@ dets <- rbindlist(dets)
 
 
 
-stations <- readxl::read_excel('p:/obrien/biotelemetry/mainstem backbone/MidBay Backbone_ACT_instrument_metadata_shortform.xlsx',
+stations <- readxl::read_excel('p:/obrien/biotelemetry/mainstem backbone/MidBay Backbone_instrument_metadata.xlsx',
                                sheet = 2, skip = 3)
 
 
@@ -47,7 +47,7 @@ dets <- dets[, -c('transmittername', 'transmitterserial', 'sensorvalue', 'sensor
                   'sensorprecision', 'dummy_end', 'starttime', 'endtime')]
 
 dets <- dets[station_key[!is.na(endtime), -c('receiver', 'starttime', 'endtime')], ,
-    on= c('transmitter', 'cruise'), nomatch = 0]
+    on = c('transmitter', 'cruise'), nomatch = 0]
 
 dets <- dets[, .('station_to' = stationname,
            'lat_to' = latitude,
@@ -57,6 +57,7 @@ dets <- dets[, .('station_to' = stationname,
            'lon_from' = i.longitude,
            'datetime' = dateandtimeutc,
            cruise)]
+dets[, day := lubridate::floor_date(datetime, 'day')]
 
 
 library(sf)
@@ -64,41 +65,38 @@ spatial_key <- st_as_sf(setorder(station_key, cruise, stationname),
                coords = c('longitude', 'latitude'),
                crs = 4326)
 
-d3 <- data.table(spatial_key)[, st_distance(geometry), by = 'cruise']
-d3[, ':='(station_from = rep(d1$stationname, times = 6),
-          station_to = rep(d1$stationname, each = 6))]
-setnames(d3, 'V1', 'dist')
+dists <- data.table(spatial_key)[, st_distance(geometry), by = 'cruise']
+dists[, ':='(station_from = rep(station_key$stationname, times = 6),
+                   station_to = rep(station_key$stationname, each = 6))]
+setnames(dists, 'V1', 'dist')
 
 
-dets[, day := lubridate::floor_date(datetime, 'day')]
+successes <- dets[, data.table(xtabs(~ station_to + station_from)), by = c('cruise', 'day')]
+trials <- dets[, data.table(trials = diag(xtabs(~ station_to + station_from)),
+                            station_from = names(diag(xtabs(~ station_to + station_from)))),
+               by = c('cruise', 'day')]
 
 
-jj <- copy(d)[, data.table(xtabs(~ station_to + station_from)), by = c('cruise', 'day')]
-kk <- copy(d)[, data.table(trials = diag(xtabs(~ station_to + station_from)),
-                           station_from = names(diag(xtabs(~ station_to + station_from)))),
-              by = c('cruise', 'day')]
+model_data <- successes[trials, on = c('cruise', 'day', 'station_from')]
+rm(successes, trials)
 
-
-jjj <- jj[kk, on = c('cruise', 'day', 'station_from')]
-
-jjj <- jjj[d3, on = c('cruise', 'station_from', 'station_to'), nomatch = 0]
-setorder(jjj, day, station_from)
+model_data <- model_data[dists, on = c('cruise', 'station_from', 'station_to'), nomatch = 0]
+setorder(model_data, day, station_from)
 
 
 
 library(lme4)
-jjj[, dist_km := as.numeric(dist)/1000]
-jjj[, day_f := as.factor(day)]
-jjj[, site_f := as.factor(station_to)]
+model_data[, ':='(dist_km = as.numeric(dist)/1000, 
+                  day_f = as.factor(day),
+                  site_f = as.factor(station_to))]
 
 
-r_test <- glmer(cbind(N, trials) ~ dist_km + (dist_km|day_f:site_f),
-                data = jjj[dist_km != 0], family = 'binomial')
+r_test <- glmer(cbind(N, trials) ~ dist_km + (dist_km||day_f:site_f),
+                data = model_data[dist_km != 0], family = 'binomial')
 
 plot(r_test, type = c('p', 'smooth'))
 #heteroscedasticity
 plot(r_test, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'))
-car::infIndexPlot(r_test)
 
 
 
@@ -133,8 +131,10 @@ ggplot(data = d50s[day != '2021-05-19']) +
   scale_color_viridis_d()
 
 d50s <- rbind(
-  d50s[day <= '2021-08-20'][d1[1:6, c('stationname', 'geometry')], on = c(site = 'stationname')],
-  d50s[day > '2021-08-20'][d1[1:6, c('stationname', 'geometry')], on = c(site = 'stationname')]
+  d50s[day <= '2021-08-20'][spatial_key[1:6, c('stationname', 'geometry')],
+                            on = c(site = 'stationname')],
+  d50s[day > '2021-08-20'][spatial_key[1:6, c('stationname', 'geometry')],
+                           on = c(site = 'stationname')]
 )
 
 d50s[, geometry := st_transform(geometry, 32618)]
@@ -162,7 +162,7 @@ animate(
 
 
 # job::job({
-  anim_save('test.mp4',
+#  anim_save('test.mp4',
     animate(
       ggplot() +
         geom_sf(data = midatl) +
@@ -183,5 +183,5 @@ animate(
       height = 630,
       scaling = 1.7
     )
-  )
+#  )
 # })
