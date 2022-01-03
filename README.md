@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# Analysis associated with the Chesapeake Telemetry Backbone
+# Analysis associated with the mid-Bay portion of the Chesapeake Telemetry Backbone
 
 ![](Figures%20and%20Animations/midbay.gif)
 
