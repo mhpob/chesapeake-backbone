@@ -1,7 +1,9 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# Analysis associates with the Chesapeake Telemetry Backbone
+# Analysis associated with the Chesapeake Telemetry Backbone
+
+![](Figures%20and%20Animations/midbay.gif)
 
 The Chesapeake Bay Acoustic Telemetry Backbone is a broad partnership
 between the University of Maryland Center for Environmental Science,
