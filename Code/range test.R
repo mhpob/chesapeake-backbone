@@ -1,5 +1,6 @@
 library(data.table)
 
+# Import individual detection logs and join them together
 dets <- list.files('p:/obrien/biotelemetry/mainstem backbone/detection files',
                    pattern = '1214.*.csv',
                    full.names = T)
@@ -10,45 +11,61 @@ dets <- lapply(dets, fread, fill = T, col.names = function(.) tolower(gsub('[) (
 dets <- rbindlist(dets)
 
 
-
-
+# Match transmitter detections to their lat/long (columns are currently NA)
+## Import station metadata (OTN format)
 stations <- readxl::read_excel('p:/obrien/biotelemetry/mainstem backbone/MidBay Backbone_instrument_metadata.xlsx',
                                sheet = 2, skip = 3)
 
-
+## Rename columns
 station_key <- data.table(stations)[, .('stationname' = STATION_NO,
                                         'transmitter' = TRANSMITTER,
                                         'starttime' = `DEPLOY_DATE_TIME   (yyyy-mm-ddThh:mm:ss)`,
                                         'latitude' = DEPLOY_LAT,
                                         'longitude' = DEPLOY_LONG,
                                         'receiver' = INS_SERIAL_NO)]
+
+## Remove receivers with no internal transmitters
 station_key <- station_key[!is.na(transmitter)]
 
+## Convert time column to time, use full receiver serial
 station_key[, ':='(starttime = as.POSIXct(starttime, format = '%Y-%m-%dT%H:%M:%S', tz = 'UTC'),
                    receiver = paste0('VR2AR-', receiver))]
 
-
+## There are 6 receivers, repeated for each cruise
+##  so just shifting the deployment time column up 6 rows to create the end time
 station_key[, endtime := shift(starttime, -6)]
+
+## Label maintenance cruises
 station_key[, cruise := rep(c('202105', '202108', '202112'), each = 6)]
 
+## Remove receivers that are currently deployed (no data yet)
+station_key <- station_key[!is.na(endtime)]
+
+## Set key (start and end time by reciever) for data.table::foverlaps
 setkey(station_key, receiver, starttime, endtime)
 
 
-
+# Join station location key and transmitter detections
+## there need to be two time columns in each data.table for foverlaps
+##  Creating a dummy column
 dets[, dummy_end := dateandtimeutc]
 
+## Conduct overlap join
 dets <- foverlaps(dets,
-                  station_key[!is.na(endtime), -'transmitter'],
+                  station_key[, -'transmitter'],
                   by.x = c('receiver', 'dateandtimeutc', 'dummy_end'),
                   nomatch = 0)
 
+## Drop unused columns
 dets <- dets[, -c('transmittername', 'transmitterserial', 'sensorvalue', 'sensorunit',
                   'i.stationname', 'i.latitude', 'i.longitude', 'transmittertype',
                   'sensorprecision', 'dummy_end', 'starttime', 'endtime')]
 
-dets <- dets[station_key[!is.na(endtime), -c('receiver', 'starttime', 'endtime')], ,
+## Join locations of transmitters that were detected
+dets <- dets[station_key[, -c('receiver', 'starttime', 'endtime')], ,
     on = c('transmitter', 'cruise'), nomatch = 0]
 
+## Rename columns for clairty
 dets <- dets[, .('station_to' = stationname,
            'lat_to' = latitude,
            'lon_to' = longitude,
@@ -60,6 +77,7 @@ dets <- dets[, .('station_to' = stationname,
 dets[, day := lubridate::floor_date(datetime, 'day')]
 
 
+# Calculate distances between receivers
 library(sf)
 spatial_key <- st_as_sf(setorder(station_key, cruise, stationname),
                coords = c('longitude', 'latitude'),
@@ -71,12 +89,18 @@ dists[, ':='(station_from = rep(station_key$stationname, times = 6),
 setnames(dists, 'V1', 'dist')
 
 
+# Calculate number of detections heard from each transmitter x receiver pair ("successes")
 successes <- dets[, data.table(xtabs(~ station_to + station_from)), by = c('cruise', 'day')]
+
+
+# Calculate total number transmissions for each receiver (times a receiver heard its own transmitter)
 trials <- dets[, data.table(trials = diag(xtabs(~ station_to + station_from)),
                             station_from = names(diag(xtabs(~ station_to + station_from)))),
                by = c('cruise', 'day')]
 
 
+
+# Build out model data
 model_data <- successes[trials, on = c('cruise', 'day', 'station_from')]
 rm(successes, trials)
 
