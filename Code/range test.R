@@ -116,15 +116,15 @@ model_data[, ':='(dist_km = as.numeric(dist)/1000,
 
 
 
-m2 <- glm(cbind(N, trials) ~ dist_km:site_f:day_f,
+m2 <- glm(cbind(N, trials - N) ~ dist_km:site_f:day_f,
           data = model_data[dist_km != 0], family = 'binomial')
-m3 <- glm(cbind(N, trials) ~ dist_km*site_f*day_f,
+m3 <- glm(cbind(N, trials - N) ~ dist_km*site_f*day_f,
           data = model_data[dist_km != 0], family = 'binomial')
 
 
-r_test <- glmer(cbind(N, trials) ~ dist_km + (dist_km||day_f:site_f),
+r_test <- glmer(cbind(N, trials - N) ~ dist_km + (dist_km||day_f:site_f),
                 data = model_data[dist_km != 0], family = 'binomial')
-rt2 <- glmer(cbind(N, trials) ~ dist_km*site_f + (1|day_f),
+rt2 <- glmer(cbind(N, trials - N) ~ dist_km*site_f + (1|day_f),
              data = model_data[dist_km != 0], family = 'binomial')
 
 plot(r_test, type = c('p', 'smooth'))
