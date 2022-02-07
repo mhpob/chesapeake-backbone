@@ -1,31 +1,38 @@
-library(data.table)
+library(ggplot2); library(data.table)
 
 # Import individual detection logs and join them together
-dets <- list.files('p:/obrien/biotelemetry/mainstem backbone/detection files',
-                   pattern = '1214.*.csv',
-                   full.names = T)
+# dets <- list.files('p:/obrien/biotelemetry/mainstem backbone/detection files',
+#                    pattern = '1214.*.csv',
+#                    full.names = T)
+# 
+# dets <- lapply(dets, fread, fill = T, col.names = function(.) tolower(gsub('[) ()]', '',.)))
+# 
+# 
+# dets <- rbindlist(dets)
+# fwrite(dets, 'embargo/raw/cruise1221_dets.csv')
 
-dets <- lapply(dets, fread, fill = T, col.names = function(.) tolower(gsub('[) ()]', '',.)))
-
-
-dets <- rbindlist(dets)
+dets <- fread('embargo/raw/cruise1221_dets.csv')
 
 
 # Match transmitter detections to their lat/long (columns are currently NA)
 ## Import station metadata (OTN format)
-stations <- readxl::read_excel('p:/obrien/biotelemetry/mainstem backbone/MidBay Backbone_instrument_metadata.xlsx',
-                               sheet = 2, skip = 3)
+# stations <- readxl::read_excel('p:/obrien/biotelemetry/mainstem backbone/MidBay Backbone_instrument_metadata.xlsx',
+#                                sheet = 2, skip = 3)
+# 
+# ## Rename columns
+# station_key <- data.table(stations)[, .('stationname' = STATION_NO,
+#                                         'transmitter' = TRANSMITTER,
+#                                         'starttime' = `DEPLOY_DATE_TIME   (yyyy-mm-ddThh:mm:ss)`,
+#                                         'latitude' = DEPLOY_LAT,
+#                                         'longitude' = DEPLOY_LONG,
+#                                         'receiver' = INS_SERIAL_NO)]
+## Store locally
+# fwrite(station_key, 'embargo/raw/station_key.csv')
 
-## Rename columns
-station_key <- data.table(stations)[, .('stationname' = STATION_NO,
-                                        'transmitter' = TRANSMITTER,
-                                        'starttime' = `DEPLOY_DATE_TIME   (yyyy-mm-ddThh:mm:ss)`,
-                                        'latitude' = DEPLOY_LAT,
-                                        'longitude' = DEPLOY_LONG,
-                                        'receiver' = INS_SERIAL_NO)]
+station_key <- fread('embargo/raw/station_key.csv')
 
 ## Remove receivers with no internal transmitters
-station_key <- station_key[!is.na(transmitter)]
+station_key <- station_key[transmitter != '']
 
 ## Convert time column to time, use full receiver serial
 station_key[, ':='(starttime = as.POSIXct(starttime, format = '%Y-%m-%dT%H:%M:%S', tz = 'UTC'),
@@ -105,6 +112,7 @@ model_data <- successes[trials, on = c('cruise', 'day', 'station_from')]
 rm(successes, trials)
 
 model_data <- model_data[dists, on = c('cruise', 'station_from', 'station_to'), nomatch = 0]
+model_data <- unique(model_data, by = c('cruise', 'station_from', 'station_to', 'day'))
 setorder(model_data, day, station_from)
 
 
@@ -113,23 +121,110 @@ library(lme4)
 model_data[, ':='(dist_km = as.numeric(dist)/1000, 
                   day_f = as.factor(day),
                   site_f = as.factor(station_to))]
+model_data <- model_data[!day %in% as.POSIXct(c('2021-05-19', '2021-08-20', '2021-12-14'), tz = 'UTC')]
+
+# job::job({
+#   r_test <- glmer(cbind(N, trials - N) ~ dist_km +  (0+dist_km|day_f:site_f) + (1|site_f),
+#                       data = model_data, family = 'binomial')
+# })
+# job::job({
+#   r_test_no0 <- glmer(cbind(N, trials - N) ~ dist_km +  (0+dist_km|day_f:site_f) + (1|site_f),
+#                    data = model_data[dist_km != 0], family = 'binomial')
+# })
+# 
+# job::job({
+# r_test2 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + site_f + (0+dist_km|day_f:site_f),
+#                 data = model_data, family = 'binomial')
+# r_test2_no0 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + site_f + (0+dist_km|day_f:site_f),
+#                      data = model_data[dist_km != 0], family = 'binomial')
+# })
+# 
+# job::job({
+#   r_test3 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + (0+dist_km|day_f:site_f) + (1|site_f) + (1|day_f),
+#                    data = model_data, family = 'binomial')
+# })
+# job::job({
+#   r_test3_no0 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + (0+dist_km|day_f:site_f) + (1|site_f) + (1|day_f),
+#                    data = model_data[dist_km != 0], family = 'binomial')
+# })
 
 
+# This is what I'm selecting
+job::job({
+  r_test4 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + site_f + (0 + dist_km|day_f:site_f) + (1|day_f),
+                   data = model_data, family = 'binomial')
+}, import = c(model_data, data.table), packages = c('lme4'))
+# job::job({
+#   r_test4_no0 <- glmer(cbind(N, trials - N) ~ 0 + dist_km + site_f + (0+dist_km|day_f:site_f) + (1|day_f),
+#                    data = model_data[dist_km != 0], family = 'binomial')
+# })
 
-m2 <- glm(cbind(N, trials - N) ~ dist_km:site_f:day_f,
-          data = model_data[dist_km != 0], family = 'binomial')
-m3 <- glm(cbind(N, trials - N) ~ dist_km*site_f*day_f,
-          data = model_data[dist_km != 0], family = 'binomial')
 
-
-r_test <- glmer(cbind(N, trials - N) ~ dist_km + (dist_km||day_f:site_f),
-                data = model_data[dist_km != 0], family = 'binomial')
-rt2 <- glmer(cbind(N, trials - N) ~ dist_km*site_f + (1|day_f),
-             data = model_data[dist_km != 0], family = 'binomial')
-
-plot(r_test, type = c('p', 'smooth'))
+plot(r_test4, type = c('p', 'smooth'))
 #heteroscedasticity
-plot(r_test, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'))
+plot(r_test4, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'))
+
+
+# d50s <- data.table(coef(r_test_no0)$`day_f:site_f`, keep.rownames = T)[, -'(Intercept)']
+# d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+# d50s <- d50s[data.table(coef(r_test_no0)$site_f, keep.rownames = T)[, -'dist_km'],
+#              on = c('site == rn')]
+# d50s[, d50 := 1000 * -`(Intercept)` / dist_km]
+# d50s[, day := as.Date(day)]
+# 
+# 
+# ggplot(data = d50s) +
+#   geom_line(aes(x = day, y = d50, color = site)) +
+#   scale_color_viridis_d()
+# 
+# 
+# d50s <- data.table(coef(r_test2_no0)$`day_f:site_f`, keep.rownames = T)
+# d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+# setnames(d50s, function(.) gsub('site_f', '', .))
+# d50s <- melt(d50s[, -'rn'], id.vars = c('day', 'site', 'dist_km'))
+# d50s <- d50s[site == variable]
+# d50s[, ':='(d50 = 1000 * (-value / dist_km),
+#             day = as.Date(day))]
+# 
+# ggplot(data = d50s) +
+#   geom_line(aes(x = day, y = d50, color = site)) +
+#   scale_color_viridis_d()
+# 
+# 
+# d50s <- data.table(coef(r_test3)$`day_f:site_f`, keep.rownames = T)
+# d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+# d50s <- d50s[, -c('(Intercept)', 'rn')]
+# d50s <- d50s[data.table(ranef(r_test3)$day_f, keep.rownames = T), on = c('day == rn')]
+# d50s <- d50s[data.table(ranef(r_test3)$site_f, keep.rownames = T), on = c('site == rn')]
+# d50s[, ':='(day = as.Date(day),
+#             d50 = 1000 * -(`(Intercept)` + `i.(Intercept)`) / dist_km)]
+# 
+# ggplot(data = d50s) +
+#   geom_line(aes(x = day, y = d50, color = site)) +
+#   ylim(c(-100, 2000)) +
+#   scale_color_viridis_d() +
+#   facet_wrap(~site)
+
+# Picking r_test4 at this point...
+d50s <- data.table(coef(r_test4)$`day_f:site_f`, keep.rownames = T)
+d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+setnames(d50s, function(.) gsub('site_f', '', .))
+d50s <- melt(d50s[, -'rn'], id.vars = c('day', 'site', 'dist_km'))
+d50s <- d50s[site == variable]
+d50s <- d50s[data.table(ranef(r_test4)$day_f, keep.rownames = T), on = c('day == rn')]
+d50s[, ':='(d50 = 1000 * (-(value + `(Intercept)`)  / dist_km),
+            day = as.Date(day))]
+
+ggplot(data = d50s) +
+  lims(y = c(0, 2000), x = c(as.Date('2021-05-20'), as.Date('2021-12-13'))) +
+  geom_line(aes(x = day, y = d50)) +
+  labs(y = 'Distance at 50% detection probability (m)', x = NULL) +
+  facet_wrap(~site) +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12),
+        axis.title = element_text(size = 15))
+
 
 
 
@@ -149,10 +244,22 @@ plot(r_test, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'))
 # d50s <- melt(d50s, id = 'day')
 
 
-d50s <- data.table(coef(r_test)$`day_f:site_f`)[, .(d50 = 1000 * -`(Intercept)` / dist_km)]
-d50s[, c('day', 'site') := tstrsplit(row.names(coef(r_test)$`day_f:site_f`), ':')]
-d50s[, day := as.Date(day)]
+# d50s <- data.table(coef(r_test)$`day_f:site_f`, keep.rownames = T)
+# # [, .(d50 = 1000 * -`(Intercept)` / dist_km)]
+# d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+# d50s <- d50s[data.table(ranef(r_test)$site_f, keep.rownames = T),
+#      on = c('site == rn')]
+# d50s <- d50s[, day := as.Date(day)]
+# d50s[, d50 := (-(`(Intercept)` + `i.(Intercept)`) / dist_km) * 1000]
 
+
+
+d50s <- data.table(coef(r_test)$`day_f:site_f`, keep.rownames = T)[, .(rn, dist_km)]
+d50s[, c('day', 'site') := tstrsplit(rn, ':')]
+d50s <- d50s[data.table(as.data.frame(fixef(r_test)), keep.rownames = T)[, site := gsub('site_f', '', rn)],
+     on = 'site']
+d50s[, d50 := (-`fixef(r_test2)` / dist_km) * 1000]
+d50s <- d50s[, day := as.Date(day)]
 
 
 library(ggplot2)
@@ -176,45 +283,90 @@ d50s[, range := st_transform(range, 4326)]
 
 midatl <- st_read('data and imports/mid-atlantic/matl_states_land.shp')
 
+
+
+
+
 library(gganimate)
 
-animate(
-  ggplot() +
-    geom_sf(data = midatl) +
-    geom_sf(data = d50s, aes(geometry = range),
-            fill = 'green', color = 'green3', alpha = 0.6) +
-    coord_sf(xlim = c(-76.5, -76.1), ylim = c(38.2, 38.4)) +
+ts_plot <- animate(
+  ggplot(data = d50s) +
+    lims(y = c(0, 2000), x = c(as.Date('2021-05-20'), as.Date('2021-12-13'))) +
+    geom_line(aes(x = day, y = d50)) +
+    labs(y = 'Distance at 50% detection probability (m)', x = NULL) +
+    facet_wrap(~site) +
     theme_minimal() +
+    theme(axis.text = element_text(size = 12),
+          strip.text = element_text(size = 12),
+          axis.title = element_text(size = 12)) +
     
-    transition_time(day, range = as.Date(c('2021-05-20', '2021-12-13'))), 
-  # +
-    # labs(title = '{frame_time}'),
-  renderer = ffmpeg_renderer()
+    transition_reveal(day, range = as.Date(c('2021-05-20', '2021-12-13'))),
   
+  nframes = 207,
+  fps = 5,
+  device = 'ragg_png',
+  res = 72,
+  width = 650,
+  height = 475,
+  scaling = 1.7
 )
 
 
+# 
+# animate(
+#   ggplot() +
+#     geom_sf(data = midatl) +
+#     geom_sf(data = d50s, aes(geometry = range),
+#             fill = 'green', color = 'green3', alpha = 0.6) +
+#     coord_sf(xlim = c(-76.5, -76.1), ylim = c(38.2, 38.4)) +
+#     theme_minimal() +
+#     
+#     transition_time(day, range = as.Date(c('2021-05-20', '2021-12-13'))), 
+#   # +
+#     # labs(title = '{frame_time}'),
+#   renderer = ffmpeg_renderer()
+#   
+# )
+
+
 # job::job({
-#  anim_save('test.mp4',
-    animate(
-      ggplot() +
-        geom_sf(data = midatl) +
-        geom_sf(data = d50s[day != '2021-05-19' & d50 > 0],
-                aes(geometry = range),
-                fill = 'green', color = 'green3', alpha = 0.6) +
-        coord_sf(xlim = c(-76.5, -76.1), ylim = c(38.2, 38.4)) +
-        theme_minimal() + 
-        
-        transition_time(day) +
-        labs(title = '{frame_time}'),
-      nframes = 209,
-      fps = 5, 
-      renderer = ffmpeg_renderer(),
-      device = 'ragg_png',
-      res = 72,
-      width = 997,
-      height = 630,
-      scaling = 1.7
-    )
-#  )
+ # anim_save('figures and animations/d50.gif',
+map <- animate(
+  ggplot() +
+    geom_sf(data = midatl) +
+    geom_sf(data = d50s[day != '2021-05-19' & d50 > 0],
+            aes(geometry = range),
+            fill = 'green', color = 'green3', alpha = 0.6) +
+    coord_sf(xlim = c(-76.48, -76.15), ylim = c(38.24, 38.4), expand = F) +
+    theme_minimal() + 
+    theme(axis.text.y = element_text(angle = 45),
+          plot.margin = margin(1, 1, 1, 1),
+          panel.grid.minor = element_blank()) +
+    
+    transition_time(day, range = as.Date(c('2021-05-20', '2021-12-13'))) +
+    labs(title = '{frame_time}'),
+  nframes = 207,
+  fps = 5, 
+  # renderer = ffmpeg_renderer(),
+  device = 'ragg_png',
+  res = 72,
+  width = 650,
+  height = 397,
+  scaling = 1.7
+)
+# )
 # })
+
+
+ library(magick)
+ ts_mgif <- image_read(ts_plot)
+ map_mgif <- image_read(map)
+ 
+ new_gif <- image_append(c(map_mgif[1], ts_mgif[1]), stack = T)
+ for(i in 2:207){
+   combined <- image_append(c(map_mgif[i], ts_mgif[i]), stack = T)
+   new_gif <- c(new_gif, combined)
+ }
+ 
+ image_write(new_gif, 'figures and animations/d50_3.gif')
+ 
