@@ -11,8 +11,8 @@ library(future)
 # Set target options:
 tar_option_set(
   # packages that your targets need to run
-  packages = c('data.table', 'readxl', 'ggplot2', 'ragg', 'lubridate', 'gt', 
-              'sf', 'geoarrow'), 
+  packages = c('dplyr', 'data.table', 'readxl', 'ggplot2', 'ragg', 'lubridate', 'gt', 
+              'sf', 'geoarrow', 'arrow'), 
   # default storage format
   format = "feather" 
   # Set other options as needed.
@@ -66,13 +66,16 @@ list(
   tar_file(md_bathy, 'data and imports/maryland_bathymetry.parquet'),
   tar_file(midatl, 'data and imports/matl_states.parquet'),
   
+  # Maps
+  tar_qs(map_bathy, create_map_bathy(md_bathy, midatl, station_key)),
+  tar_qs(ches_map, create_ches_map(midatl, station_key)),
+  
   # ACT/MATOS push summaries
   #   Last was on 2022-04-15; 2022-07-13
   
   tar_target(act_push_dates, data.frame(previous = as.Date('2022-04-15'),
-                                        current = as.Date('2022-07-13')))#,
-  # tar_quarto(act_push_summary, 'notebooks/targets_notebooks/ACT-push-summary.qmd')
-  # tar_quarto(test, 'reports/test.qmd')
+                                        current = as.Date('2022-07-13'))),
+  tar_quarto(act_push_summary, 'reports/ACT-push-summary.qmd')
   
   # 
   # tar_target(matched_unmatched, tag_matching(detections, act, tag_lists),
@@ -80,4 +83,6 @@ list(
   # 
   # tar_target(matched_detections, matched_unmatched$matched),
   # tar_target(unmatched_detections, matched_unmatched$unmatched),
+  
+
 )
