@@ -32,6 +32,8 @@ upload_time <- tar_meta(starts_with('matos'),
 ```
 
 ```{r n-pis}
+#| warning: false
+
 pis <-  unique(matos, by = c('trackercode', 'tag_contact_pi')) |> 
   DT(, ':='(PI = strsplit(tag_contact_pi, ' \\(|\\)(, )?'),
             POC = strsplit(tag_contact_poc, ' \\(|\\)(, )?'))) |>
@@ -47,7 +49,7 @@ pis <-  unique(matos, by = c('trackercode', 'tag_contact_pi')) |>
   DT(, emails := unlist(
     lapply(
       lapply(emails, unique),
-      paste, collapse = ', ')))
+      paste, collapse = '\n')))
 
 ```
 
@@ -81,7 +83,7 @@ mt <- merge(
   unique(matos, by  = 'fieldnumber')[, .(individuals = .N), by = 'trackercode']
 )
 
-mt <- merge(mt, pis[, .(trackercode, PI)])
+mt <- merge(mt, pis[, .(trackercode, PI, POC, emails)])
 mt[, trackercode := ifelse(grepl('^PROJ', trackercode), 
                            paste0('ACT.', trackercode), trackercode)]
 
@@ -89,10 +91,12 @@ mt <- merge(mt, otn_tables[[1]][, .(resource_full_name, trackercode = collection
 
 mt[, ':='(network = gsub('\\..*', '', trackercode),
           code = gsub('.*\\.', '', trackercode),
-          trackercode = NULL)]
+          trackercode = NULL,
+          PI = fifelse(PI == 'NA', '', PI),
+          POC = fifelse(POC == 'NA', '', POC))]
 
-mt <- mt[, .(PI, resource_full_name, network, code, detections, individuals)]
-setnames(mt, c('PIs', 'Project name', 'Network', 'Project code', 'Detections', 'Individuals'))
+mt <- mt[, .(PI, POC, resource_full_name, network, code, detections, individuals, emails)]
+setnames(mt, c('PIs', 'POC', 'Project name', 'Network', 'Project code', 'Detections', 'Individuals', 'Contact info'))
 
 setorder(mt, -'Detections', -'Individuals')
 
