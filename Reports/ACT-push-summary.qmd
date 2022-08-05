@@ -142,44 +142,53 @@ ggplot() +
 ```{r}
 #| label: station-summary-table
 
+.simpleCap <- function(x) {
+  x <- tolower(x)
+  s <- strsplit(x, " ")[[1]]
+  paste(toupper(substring(s, 1, 1)), substring(s, 2),
+        sep = "", collapse = " ")
+}
+
 station_summary <- merge(
   matos[, .(detections = .N), by = 'station'],
   unique(matos, by  = c('fieldnumber', 'station'))[, .(individuals = .N), by = 'station']
-)
+) |> 
+  DT(, station := sapply(station, .simpleCap))
 
-station_summary[, station := factor(station,
-                                 levels = c(paste0('FS0', 6:1),
-                                               'MILL', 'GRGTN', 'PHIPP-E', 'PHIPP',
-                                               'DPL', 'MMM', 'BIW02', 'BIW01', 'SAS',
-                                               'NBATH'),
-                                 ordered = T)]
 setnames(station_summary, c('Station', 'Detections', 'Individuals'))
-setorder(station_summary, -Station)
 
 station_summary |> 
   gt() |> 
-  tab_header(title = 'Records by Kennebec receivers') |> 
-  tab_footnote('statons listed from north to south',
+  tab_header(title = 'Records by receivers') |> 
+  tab_footnote('statons listed from west to east',
                 locations = cells_title()) |> 
   as_raw_html()
 ```
 
 ```{r}
-maine <- st_read(tar_read('maine_polygon'), quiet = T)
+midatl <- read_geoparquet_sf(tar_read('midatl'))
+bathy <- tar_read('md_bathy') |> 
+  arrow::open_dataset() |> 
+  dplyr::filter(CONTOUR %in% seq(-50, -5, by = 5)) |> 
+  geoarrow_collect_sf() |> 
+  st_transform(4326)
 
-tar_load(station_key)
-station_spatial <- unique(station_key, by = 'stationname') |> 
-  DT(station_summary, ,on = c('stationname'= 'Station')) |> 
+
+
+station_spatial <- tar_read(station_key) |> 
+  unique(by = 'stationname') |> 
+  DT(station_summary, , on = c('stationname'= 'Station')) |> 
   data.frame() |> 
   st_as_sf(coords = c('deploy_long', 'deploy_lat'), crs = 4326)
 
 ## need spatial for station
 ggplot() +
-  geom_sf(data = maine) +
-  geom_sf(data = station_spatial, aes(size = Detections, color = Individuals)) +
-  labs(subtitle = 'Records by Kennebec receivers') +
+  geom_sf(data = midatl) +
+  geom_sf(data = station_spatial,
+          aes(size = Detections, color = Individuals)) +
+  labs(subtitle = 'Records by Mid-Bay receivers') +
   scale_color_viridis_c() +
-  coord_sf(xlim = c(430000, 440000), ylim = c(4838500, 4865000)) +
+  coord_sf(xlim = c(-76.5, -76.15), ylim = c(38.25, 38.45)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
