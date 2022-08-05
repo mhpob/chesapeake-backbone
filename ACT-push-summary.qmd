@@ -9,29 +9,40 @@ execute:
   echo: false
 ---
 
-```{r packages, message=FALSE}
+```{r}
+#| label: packages
+#| message: false
+
 library(targets)
 library(data.table)
 library(sf)
+library(geoarrow)
 library(ggplot2)
 library(gt)
 ```
 
-```{r matos-read}
+```{r}
+#| label: matos-read
+
 matos <- tar_read(matos_matched)
 
 matos <- lapply(matos, fread, na.strings = '')
 matos <- rbindlist(matos)
 ```
 
-```{r upload-tims}
+```{r}
+#| label: upload-times
+
 upload_time <- tar_meta(starts_with('matos'),
                     fields = c('time', 'path')) |> 
   as.data.table() |> 
   DT(grepl('qualified', path), file.info(as.character(path))$ctime)
+
+push_dates <- tar_read(act_push_dates)
 ```
 
 ```{r n-pis}
+#| label: n-pis
 #| warning: false
 
 pis <-  unique(matos, by = c('trackercode', 'tag_contact_pi')) |> 
@@ -73,11 +84,15 @@ otn_tables <- lapply(otn_metadata_query, fread)
 otn_tables <- lapply(otn_tables, function(.) .[!grepl('^[FA]', collectioncode), collectioncode := paste0('OTN.', collectioncode)])
 ```
 
-These are data related to the July 2022 ACT/MATOS data push. New matched detection files (["qualified" files](https://members.oceantrack.org/data/otn-detection-extract-documentation-matched-to-animals#autotoc-item-autotoc-2)) were uploaded between `r format(min(upload_time),'%H:%M:%S')` and `r format(max(upload_time),'%H:%M:%S')` on `r format(min(upload_time),'%B %d')`.
+These are data related to the `r format(push_dates$current, '%B %Y')` ACT/MATOS data push. New matched detection files (["qualified" files](https://members.oceantrack.org/data/otn-detection-extract-documentation-matched-to-animals#autotoc-item-autotoc-2)) were uploaded between `r format(min(upload_time),'%H:%M:%S')` and `r format(max(upload_time),'%H:%M:%S')` on `r format(min(upload_time),'%B %d')`. The last data push occurred on `r format(push_dates$previous, '%B %d, %Y')`.
 
-A total of `r format(nrow(matos), big.mark = ',')` detections of `r uniqueN(matos, by  = 'fieldnumber')` individuals were matched via [ACT/MATOS](https://matos.asascience.com/project/detail/192) and [OTN](https://members.oceantrack.org/OTN/project?ccode=ACT.PROJ192) across `r uniqueN(matos, by = 'trackercode')` different projects consisting of `r length(unique(unlist(strsplit(pis$PI, ',\\s?'))))` principal investigators.
+## Overall
+
+A total of `r format(nrow(matos), big.mark = ',')` detections of `r uniqueN(matos, by  = 'fieldnumber')` individuals were matched via [ACT/MATOS](https://matos.asascience.com/project/detail/192) and [OTN](https://members.oceantrack.org/OTN/project?ccode=ACT.PROJ192). The detections span across `r uniqueN(matos, by = 'trackercode')` different projects consisting of `r length(unique(unlist(strsplit(pis$PI, ',\\s?'))))` principal investigators.
 
 ```{r}
+#| label: otn-match-table
+
 mt <- merge(
   matos[, .(detections = .N), by = 'trackercode'],
   unique(matos, by  = 'fieldnumber')[, .(individuals = .N), by = 'trackercode']
@@ -106,22 +121,27 @@ gt(mt) |>
 ```
 
 ```{r}
+#| label: otn-match-map
+
 otn_sf <- otn_tables[[1]] |> 
   data.frame() |> 
   st_as_sf(wkt = 'the_geom', crs = 4326)
+otn_limits <- st_bbox(otn_sf)
 
-
-natural_earth <- st_read(tar_read('natural_earth'), quiet = T)
+natural_earth <- read_geoparquet_sf(tar_read('natural_earth'), quiet = T)
 
 ggplot() +
   geom_sf(data = natural_earth) +
-  geom_sf(data = otn_sf, fill = NA) +
-  coord_sf(xlim = c(-85, 0), ylim = c(26, 50)) +
+  geom_sf(data = otn_sf, fill = NA, color = 'blue') +
+  coord_sf(xlim = c(otn_limits['xmin'] - 5, otn_limits['xmax'] + 5),
+           ylim = c(otn_limits['ymin'] - 5, otn_limits['ymax'] + 5)) +
   labs(title = 'Geographic extent of detected projects') +
   theme_minimal()
 ```
 
 ```{r}
+#| label: station-summary-table
+
 station_summary <- merge(
   matos[, .(detections = .N), by = 'station'],
   unique(matos, by  = c('fieldnumber', 'station'))[, .(individuals = .N), by = 'station']
