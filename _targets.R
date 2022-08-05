@@ -11,7 +11,8 @@ library(future)
 # Set target options:
 tar_option_set(
   # packages that your targets need to run
-  packages = c('data.table', 'readxl', 'ggplot2', 'ragg', 'lubridate', 'gt', 'sf'), 
+  packages = c('data.table', 'readxl', 'ggplot2', 'ragg', 'lubridate', 'gt', 
+              'sf', 'geoarrow'), 
   # default storage format
   format = "feather" 
   # Set other options as needed.
@@ -39,9 +40,8 @@ list(
   
   
   # Follow/import receiver locations
-  tar_target(receiver_deployment,
-             'embargo/act/midbay backbone_instrument_metadata.xlsx',
-             format = 'file'),
+  tar_file(receiver_deployment,
+             'embargo/act/midbay backbone_instrument_metadata.xlsx'),
   tar_target(station_key, make_station_key(receiver_deployment)),
   
   
@@ -51,8 +51,7 @@ list(
   
   
   
-  tar_target(act_dropbox, 'embargo/act/active transmitters.xlsx',
-             format = 'file'),
+  tar_file(act_dropbox, 'embargo/act/active transmitters.xlsx'),
   tar_target(act_clean, act_fix(act_dropbox)),
   
   tar_target(act_matched, match_act(detections, act_clean)),
@@ -60,13 +59,19 @@ list(
   tar_files_input(matos_matched,
                   list.files('embargo/act', full.names = T,
                              pattern = 'qualified.*\\.csv')),
-  
-  
+
+
   # Spatial objects
-  tar_target(md_bathy, 'data and imports/maryland_bathymetry.parquet',
-             format = 'file'),
-  tar_target(midatl, 'data and imports/matl_states.parquet')
+  tar_file(natural_earth, 'data and imports/ne_10m_coastline.parquet'),
+  tar_file(md_bathy, 'data and imports/maryland_bathymetry.parquet'),
+  tar_file(midatl, 'data and imports/matl_states.parquet'),
   
+  # ACT/MATOS push summaries
+  #   Last was on 2022-04-15; 2022-07-13
+  
+  tar_target(act_push_dates, data.frame(previous = as.Date('2022-04-15'),
+                                        current = as.Date('2022-07-13')))#,
+  # tar_quarto(act_push_summary, 'notebooks/targets_notebooks/ACT-push-summary.qmd')
   # tar_quarto(test, 'reports/test.qmd')
   
   # 
